@@ -1,0 +1,371 @@
+---
+title: 'Project # 1'
+author: "Sonya Tahir"
+date: "March 13, 2016"
+output: word_document
+---
+
+# Loading Training and Test Data
+
+```{r}
+setwd("C:/Sonya/GW/Data Analysis/Assignments/Project01")
+trainingData <- read.csv("X.csv", header = TRUE, sep = " ")
+
+Y <- read.csv("Y.csv", header = TRUE, sep = " ")
+#trainingData <- within(trainingData,rm(Y))
+trainingData$Y <- Y$x
+rm(Y)
+
+testData <- read.csv("Xtest.csv", header = TRUE, sep = " ")
+```
+
+# Looking at the distributions of the variables and their correlations
+
+```{r}
+library(ggplot2)
+library(reshape)
+trainingData.melt = melt(trainingData)
+ggplot(trainingData.melt,aes(x=value))+geom_density()+facet_wrap(~variable,scales="free")
+
+library(corrplot)
+corrplot(cor(trainingData))
+```
+
+
+
+# Forward Stepwise Selection
+
+```{r}
+library(leaps)
+regfit.fwd <- regsubsets(Y~.,trainingData,nvmax=16,method="forward")
+summary(regfit.fwd)
+regfit.fwd.summary <- summary(regfit.fwd)
+
+plot(regfit.fwd.summary$cp)
+regfit.fwd.summary$cp
+coef(regfit.fwd,4)
+```
+
+# Linear Regression Model
+
+```{r}
+library(boot)
+lm1 <- glm(Y~., data = trainingData)
+lm1.cv <- cv.glm(trainingData,lm1)
+lm1.mse <- lm1.cv$delta[1]
+lm1.mse
+
+lm2 <- glm(Y~V6+V10+V14+V16, data = trainingData)
+lm2.cv <- cv.glm(trainingData,lm2)
+lm2.mse <- lm2.cv$delta[1]
+lm2.mse
+
+lm3 <- glm(Y~V6+V10+V14+V16+V1, data = trainingData)
+lm3.cv <- cv.glm(trainingData,lm3)
+lm3.mse <- lm3.cv$delta[1]
+lm3.mse
+
+lm4 <- glm(Y~V6+V10+V14+V16+V2,data=trainingData)
+lm4.cv <- cv.glm(trainingData,lm4)
+lm4.mse <- lm4.cv$delta[1]
+lm4.mse
+```
+
+I tried adding each variable one by one to the model with the four selected variables (V6, V10, V14 and V16) but none of them improved the mse.
+
+# Higher Degree Polynomials
+
+```{r}
+V6MSE <- rep(0,10)
+for(i in 1:10){
+  templm <- glm(Y~V10+V14+V16+poly(V6,i),data=trainingData)
+  tempCV <- cv.glm(trainingData,templm)
+  V6MSE[i] <- tempCV$delta[1]
+}
+plot(V6MSE)
+which.min(V6MSE)
+V6MSE
+```
+
+V6 = 2
+
+```{r}
+V10MSE <- rep(0,10)
+for(i in 1:10){
+  templm <- glm(Y~V6+V14+V16+poly(V10,i),data=trainingData)
+  tempCV <- cv.glm(trainingData,templm)
+  V10MSE[i] <- tempCV$delta[1]
+}
+plot(V10MSE)
+which.min(V10MSE)
+V10MSE
+```
+
+v10 = 2
+
+```{r}
+V14MSE <- rep(0,10)
+for(i in 1:10){
+  templm <- glm(Y~V6+V10+V16+poly(V14,i),data=trainingData)
+  tempCV <- cv.glm(trainingData,templm)
+  V14MSE[i] <- tempCV$delta[1]
+}
+plot(V14MSE)
+which.min(V14MSE)
+V14MSE
+```
+
+v14 = 4
+
+We cannot make polynomials of higher degree for V16 because degree must be less than the number of unique points and V16 only has two unique points, 0 and 1.
+
+```{r}
+lm5 <- glm(Y~poly(V6,2)+poly(V10,2)+poly(V14,4)+V16,
+           data=trainingData)
+lm5.cv <- cv.glm(trainingData,lm5)
+lm5.mse <- lm5.cv$delta[1]
+lm5.mse
+```
+mse is 0.2101 for lm5
+
+# Splines
+
+```{r}
+library(mgcv)
+model.s1 <- gam(Y~V6+V10+V14+V16, data = trainingData)
+summary(model.s1)
+
+library(gamclass)
+CVgam(formula(model.s1),data = trainingData)
+```
+
+MSE 0.2233
+
+```{r}
+model.s2 <- gam(Y~V6+s(V10)+V14+V16, data = trainingData)
+summary(model.s2)
+CVgam(formula(model.s2),data = trainingData)
+```
+
+Using spline for V6 alone did not reduce MSE. Using it on V10 did. So we will keep it. I also tried spline on V14 and V16 with no improvement in mse. Next, I tried using different values for k in spline function for each variable. The only combination that improved the mse was for V10 with k=3.
+```{r}
+model.s3 <- gam(Y~V6+V7+s(V10,k=3)+V14+V16, data = trainingData)
+summary(model.s3)
+CVgam(formula(model.s3),data = trainingData)
+```
+
+0.2173
+
+# Trying again with subset selection
+
+```{r}
+#library(leaps)
+regfit.full <- regsubsets(Y~.,trainingData, nvmax = 16)
+summary(regfit.full)
+```
+
+Order in which variables are selected is :
+V16, V6, V10, V14, V3, V2, V9, V15, V12, V7, V8, V1, V13, V11, V4, V5.
+Lets add these variables to the model in the same order.
+I checked mse by adding each variable one by one and then trying their polynomial version and with spline. Following is the best model that I got with this process.
+
+```{r}
+model.all <- gam(Y~V16+V6+s(V10, k=2)+poly(V14,4)+poly(V3,4)+V7, data = trainingData)
+summary(model.all)
+CVgam(formula(model.all),data = trainingData)
+```
+0.2122
+
+
+# Summary
+
+Best model with lm using polynomials of higher degree was lm5 with mse 0.2101.
+
+```{r}
+lm5 <- glm(Y~poly(V6,2)+poly(V10,2)+poly(V14,4)+V16,
+           data=trainingData)
+lm5.cv <- cv.glm(trainingData,lm5)
+lm5.mse <- lm5.cv$delta[1]
+lm5.mse
+summary(lm5)
+```
+
+Best model with splines was model.s3 with mse 0.2172
+
+```{r}
+model.s3 <- gam(Y~V6+s(V10,k=3)+V14+V16, data = trainingData)
+summary(model.s3)
+CVgam(formula(model.s3),data = trainingData)
+```
+
+Best model combining techniques was model.all with mse 0.2122.
+
+```{r}
+model.all <- gam(Y~V16+V6+s(V10, k=2)+poly(V14,4)+poly(V3,4)+V7, data = trainingData)
+summary(model.all)
+CVgam(formula(model.all),data = trainingData)
+```
+
+# Ridge and LASSO
+
+Now trying ridge
+
+```{r}
+library(glmnet)
+ridge.cv <- cv.glmnet(x=as.matrix(trainingData[,-17]),
+                      y=as.matrix(trainingData[,17]),alpha=0)
+plot(ridge.cv)
+
+summary(ridge.cv)
+```
+
+Lowest mse is about 0.24. Not useful.
+
+Next we will try lasso.
+
+```{r}
+lasso.cv <- cv.glmnet(x=as.matrix(trainingData[,-17]),
+                      y=as.matrix(trainingData[,17]),alpha=1)
+plot(lasso.cv)
+```
+
+Lowest is about 0.24. Again not useful.
+
+Therefore lm5 is the best model until now.
+
+#Outliers
+Checking outliers with lm5
+
+```{r}
+plot(lm5,which = 4)
+plot(lm5,which = 5)
+```
+
+Removing outliers 121, 52, 233
+```{r}
+#taking backup of trainingData
+trainingDataBackup = trainingData
+#restoring backup
+#trainingData = trainingDataBackup
+
+ind <- c(121,52,233)
+trainingData = trainingData[-ind,]
+
+```
+
+Rechecking mse of all three models after outlier removal.
+
+```{r}
+lm5 <- glm(Y~poly(V6,2)+poly(V10,2)+poly(V14,4)+V16,
+           data=trainingData)
+lm5.cv <- cv.glm(trainingData,lm5)
+lm5.mse <- lm5.cv$delta[1]
+lm5.mse
+```
+0.1667
+
+```{r}
+model.s3 <- gam(Y~V6+s(V10,k=3)+V14+V16, data = trainingData)
+summary(model.s3)
+CVgam(formula(model.s3),data = trainingData)
+```
+
+0.1765
+
+```{r}
+model.all <- gam(Y~V16+V6+s(V10, k=2)+poly(V14,4)+poly(V3,4)+V7, data = trainingData)
+summary(model.all)
+CVgam(formula(model.all),data = trainingData)
+```
+
+0.1671
+
+Therefore we choose lm5 as the best model with the least mse of 0.1667.
+
+#Assumptions
+```{r}
+library(car)
+hist(lm5$residuals)
+plot(lm5,which = 2)
+shapiro.test(lm5$residuals)
+#linearity
+plot(lm5,which = 1)
+#Homoskedasticity
+plot(lm5,which=3)
+```
+
+From these, we can see that the residuals are not normal. 145 seems to be a clear outlier still. I will remove that as well and retry building model lm5.
+
+```{r}
+#restoring backup
+trainingData = trainingDataBackup
+
+ind <- c(121,52,233,145)
+trainingData = trainingData[-ind,]
+```
+
+
+```{r}
+lm5 <- glm(Y~poly(V6,2)+poly(V10,2)+poly(V14,4)+V16,
+           data=trainingData)
+lm5.cv <- cv.glm(trainingData,lm5)
+lm5.mse <- lm5.cv$delta[1]
+lm5.mse
+```
+
+The mse is 0.1483. Removing outlier 145 has resulted in significant improvement.
+
+```{r}
+summary(lm5)
+```
+
+
+Second degree of V6 is not significant. Lets try removing it.
+
+
+```{r}
+lm5 <- glm(Y~V6+poly(V10,2)+poly(V14,4)+V16,
+           data=trainingData)
+lm5.cv <- cv.glm(trainingData,lm5)
+lm5.mse <- lm5.cv$delta[1]
+lm5.mse
+```
+
+Removing second degree of V6 improves mse to 0.14819.
+
+I tried removing the second degree of V10 also since it was not significant but mse increased to 0.1483. So i will keep that in.
+
+```{r}
+summary(lm5)
+```
+
+
+The summary now shows that each variable selected in the model is signifcant. V16 and V10 are the most significant variables in the model. The AIC of the model is 231.09.
+
+Again checking assumptions
+
+```{r}
+hist(lm5$residuals)
+plot(lm5,which = 2)
+shapiro.test(lm5$residuals)
+#linearity
+plot(lm5,which = 1)
+#Homoskedasticity
+plot(lm5,which=3)
+```
+
+The final model has an MSE of 0.14819. The residuals are normal as per the Shapiro-Wilk test. The model is not reasonably linear. The errors are not homoskedastic although the variation is not too large. The p-values for the individual variables can be considered an indicator to compare the variables. Since all assumptions of the linear model are not met (homoskedasticity is not met), we can not say that the p-values are meaningful.
+
+To improve the prediction further, Greystone Broadcasting can gather more data about the variables that have been included in the model. They can also look at outliers to see if that was an error in data recording. There might be other errors in data which might go unnoticed if they are still within reasonable range of the data but they will influence the model to not be able to predict the target accurately. Greystone broadcasting can also start collecting other data variables. Sometimes unexpected relations exist which help predict the target even though we might not have thought of them as such.
+
+
+# Hold out Data
+ In the beginning, I loaded the hold out data into testData. I will now use lm5 to predict target for the hold out data.
+ 
+```{r}
+predictedY <- predict(lm5, newdata = testData)
+predictedY <- data.frame(predictedY)
+testData$Y <- predictedY$predictedY
+write.csv(testData, file = "testDataPredicted.csv")
+```
+
